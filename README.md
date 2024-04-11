@@ -10,7 +10,10 @@ SELECT *
 FROM dsv1069.final_assignments_qa;
 ```
 Obtaining the following result:
-![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/d6511d5a-48e9-4d25-be46-7d5daf20bc33)
+
+![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/aca561a5-f9b0-44d4-b122-6e34a8175591)
+
+
 Therefore, we can conclude that it is not, as the created_at data is necessary.
 
 ### 2. A query and table creation statement to make final_assignments_qa look like the final_assignments table:
@@ -23,108 +26,143 @@ Therefore, we can conclude that it is not, as the created_at data is necessary.
       dsv1069.final_assignments_qa;
    ```
   Obtaining the following result:
-  ![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/e4a21188-392d-416e-9f90-bf04927bf1e9)
+
+  ![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/54e5b658-2b5c-4857-a052-990f18c47318)
+
 
 ### 3. Use the final_assignments table to calculate the order binary for the 30 day window after the test assignment for item_test_2 (You may include the day the test started):
 
 ```sql
-SELECT test_assignment,
-       COUNT(DISTINCT item_id) AS number_of_items,
-       SUM(order_binary) AS items_ordered_30d
+SELECT
+  test_assignment,
+  COUNT(item_id) as items,
+  SUM(order_binary_30d) AS ordered_items_30d
 FROM
-  (SELECT item_test_2.item_id,
-          item_test_2.test_assignment,
-          item_test_2.test_number,
-          item_test_2.test_start_date,
-          item_test_2.created_at,
-          MAX(CASE
-                  WHEN (created_at > test_start_date
-                        AND DATE_PART('day', created_at - test_start_date) <= 30) THEN 1
-                  ELSE 0
-              END) AS order_binary
-   FROM
-     (SELECT final_assignments.*,
-             DATE(orders.created_at) AS created_at
-      FROM dsv1069.final_assignments AS final_assignments
-      LEFT JOIN dsv1069.orders AS orders
-        ON final_assignments.item_id = orders.item_id
-        WHERE test_number = 'item_test_2') AS item_test_2
-   GROUP BY item_test_2.item_id,
-            item_test_2.test_assignment,
-            item_test_2.test_number,
-            item_test_2.test_start_date,
-            item_test_2.created_at) AS order_binary
+(
+  SELECT 
+   fa.test_assignment,
+   fa.item_id, 
+   MAX(CASE WHEN orders.created_at > fa.test_start_date THEN 1 ELSE 0 END)  AS order_binary_30d
+  FROM 
+    dsv1069.final_assignments fa
+    
+  LEFT OUTER JOIN
+    dsv1069.orders
+  ON 
+    fa.item_id = orders.item_id 
+  AND 
+    orders.created_at >= fa.test_start_date
+  AND 
+    DATE_PART('day', orders.created_at - fa.test_start_date ) <= 30
+  WHERE 
+    fa.test_number= 'item_test_2'
+  GROUP BY
+    fa.test_assignment,
+    fa.item_id
+) item_level
 GROUP BY test_assignment;
 ```
  Obtaining the following result:
- ![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/9df6e977-87c5-41de-b271-b89285a9c35e)
+![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/abb9806b-a324-426b-a738-9d2c4001715c)
+
 
  ### 4. Use the final_assignments table to calculate the view binary, and average views for the 30 day window after the test assignment for item_test_2. (You may include the day the test started):
 ```sql
-SELECT item_test_2.item_id,
-       item_test_2.test_assignment,
-       item_test_2.test_number,
-       MAX(CASE
-               WHEN (view_date > test_start_date
-                     AND DATE_PART('day', view_date - test_start_date) <= 30) THEN 1
-               ELSE 0
-           END) AS view_binary
-FROM
-  (SELECT final_assignments.*,
-          DATE(events.event_time) AS view_date
-   FROM dsv1069.final_assignments AS final_assignments
-   LEFT JOIN
-       (SELECT event_time,
-               CASE
-                   WHEN parameter_name = 'item_id' THEN CAST(parameter_value AS NUMERIC)
-                   ELSE NULL
-               END AS item_id
-      FROM dsv1069.events
-      WHERE event_name = 'view_item') AS events
-     ON final_assignments.item_id = events.item_id
-   WHERE test_number = 'item_test_2') AS item_test_2
-GROUP BY item_test_2.item_id,
-         item_test_2.test_assignment,
-         item_test_2.test_number
-LIMIT 100;
+SELECT
+test_assignment,
+COUNT(item_id) AS items,
+SUM(view_binary_30d) AS viewed_items,
+CAST(100*SUM(view_binary_30d)/COUNT(item_id) AS FLOAT) AS viewed_percent,
+SUM(views) AS views,
+SUM(views)/COUNT(item_id) AS average_views_per_item
+FROM 
+(
+ SELECT 
+   fa.test_assignment,
+   fa.item_id, 
+   MAX(CASE WHEN views.event_time > fa.test_start_date THEN 1 ELSE 0 END)  AS view_binary_30d,
+   COUNT(views.event_id) AS views
+  FROM 
+    dsv1069.final_assignments fa
+    
+  LEFT OUTER JOIN 
+    (
+    SELECT 
+      event_time,
+      event_id,
+      CAST(parameter_value AS INT) AS item_id
+    FROM 
+      dsv1069.events 
+    WHERE 
+      event_name = 'view_item'
+    AND 
+      parameter_name = 'item_id'
+    ) views
+  ON 
+    fa.item_id = views.item_id
+  AND 
+    views.event_time >= fa.test_start_date
+  AND 
+    DATE_PART('day', views.event_time - fa.test_start_date ) <= 30
+  WHERE 
+    fa.test_number= 'item_test_2'
+  GROUP BY
+    fa.test_assignment,
+    fa.item_id
+) item_level
+GROUP BY 
+ test_assignment;
 ```
 Obtaining the following result:
-![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/24a1d7e8-c497-4a6f-9efd-2941f47681d5)
+
+![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/26879016-3780-4dc2-992a-09b846835b54)
+
 
 ### 5. Use the [ABBA - AB Testings Statistics](https://thumbtack.github.io/abba/demo/abba.html) to compute the lifts in metrics and the p-values for the binary metrics (30 day order binary and 30 day view binary) using a interval 95% confidence. To do this, let's create the query to obtain the data:
 ```sql
-SELECT test_assignment,
-       test_number,
-       COUNT(DISTINCT item) AS number_of_items,
-       SUM(view_binary_30d) AS view_binary_30d
-FROM
-  (SELECT final_assignments.item_id AS item,
-          test_assignment,
-          test_number,
-          test_start_date,
-          MAX((CASE
-                   WHEN date(event_time) - date(test_start_date) BETWEEN 0 AND 30 THEN 1
-                   ELSE 0
-               END)) AS view_binary_30d
-   FROM dsv1069.final_assignments
-   LEFT JOIN dsv1069.view_item_events
-     ON final_assignments.item_id = view_item_events.item_id
-   WHERE test_number = 'item_test_2'
-   GROUP BY final_assignments.item_id,
-            test_assignment,
-            test_number,
-            test_start_date) AS view_binary
-GROUP BY test_assignment,
-         test_number,
-         test_start_date;
+SELECT
+test_assignment,
+COUNT(item_id) AS items,
+SUM(view_binary_30d) AS viewed_items
+FROM 
+(
+ SELECT 
+   fa.test_assignment,
+   fa.item_id, 
+   MAX(CASE WHEN views.event_time > fa.test_start_date THEN 1 ELSE 0 END)  AS view_binary_30d
+  FROM 
+    dsv1069.final_assignments fa
+    
+  LEFT OUTER JOIN 
+    (
+    SELECT 
+      event_time, 
+      CAST(parameter_value AS INT) AS item_id
+    FROM 
+      dsv1069.events 
+    WHERE 
+      event_name = 'view_item'
+    AND 
+      parameter_name = 'item_id'
+    ) views
+  ON 
+    fa.item_id = views.item_id
+  AND 
+    views.event_time >= fa.test_start_date
+  AND 
+    DATE_PART('day', views.event_time - fa.test_start_date ) <= 30
+  WHERE 
+    fa.test_number= 'item_test_2'
+  GROUP BY
+    fa.test_assignment,
+    fa.item_id
+) item_level
+GROUP BY 
+ test_assignment;
 ```
 Obtaining the following result:
-![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/3df9ab5a-834c-42ee-a04e-0f2bc64cc012)
-![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/312d8d1b-cd32-441b-8359-d4d981ce54d2)
 
-**View Binary:** We can say with 95% confidence that the lift value is 2% and the p_value is 0.2. There is not a significant difference in the number of views within 30days of the assigned treatment date between the two treatments.
-
-**Order binary:** There is no detectable change in this metric. The p-value is 0.86 meaning that there is a no significant difference in the number of orders within 30days of the assigned treatment date between the two treatments.
+![image](https://github.com/jubssoares/ab-testing-coursera/assets/104150753/50366c1d-4ec9-480f-8d0d-e9040345286e)
 
 ### 6. Use Mode’s Report builder feature to write up the test. Your write-up should include a title, a graph for each of the two binary metrics you’ve calculated. The lift and p-value (from the AB test calculator) for each of the two metrics, and a complete sentence to interpret the significance of each of the results.
 
